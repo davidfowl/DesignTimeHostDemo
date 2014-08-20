@@ -27,7 +27,7 @@ namespace DesignTimeHostDemo
         public void Start()
         {
             Trace.TraceInformation("[ProcessingQueue]: Start()");
-            new Thread(ReceiveMessages).Start();
+            new Thread(ReceiveMessages) { IsBackground = true }.Start();
         }
 
         public void Post(Message message)
@@ -46,7 +46,7 @@ namespace DesignTimeHostDemo
                 while (true)
                 {
                     var message = JsonConvert.DeserializeObject<Message>(_reader.ReadString());
-                    Trace.TraceInformation("[ProcessingQueue]: OnReceive({0})", message);
+                    Trace.TraceInformation("[ProcessingQueue]: OnReceive({0})", message.MessageType);
                     OnReceive(message);
                 }
             }

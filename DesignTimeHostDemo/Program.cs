@@ -62,22 +62,22 @@ namespace DesignTimeHostDemo
                     if (m.MessageType == "References")
                     {
                         // References as well as the dependency graph information
-                        var val = m.Payload.ToObject<ReferencesMessage>();
+                        // var val = m.Payload.ToObject<ReferencesMessage>();
                     }
                     else if (m.MessageType == "Diagnostics")
                     {
                         // Errors and warnings
-                        var val = m.Payload.ToObject<DiagnosticsMessage>();
+                        // var val = m.Payload.ToObject<DiagnosticsMessage>();
                     }
                     else if (m.MessageType == "Configurations")
                     {
                         // Configuration and compiler options
-                        var val = m.Payload.ToObject<ConfigurationsMessage>();
+                        // var val = m.Payload.ToObject<ConfigurationsMessage>();
                     }
                     else if (m.MessageType == "Sources")
                     {
                         // The sources to feed to the language service
-                        var val = m.Payload.ToObject<SourcesMessage>();
+                        // var val = m.Payload.ToObject<SourcesMessage>();
                     }
                 };
 
@@ -91,7 +91,7 @@ namespace DesignTimeHostDemo
 
                 foreach (var projectFile in Directory.EnumerateFiles(solutionPath, "project.json", SearchOption.AllDirectories))
                 {
-                    string projectPath = Path.GetDirectoryName(projectFile).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                    string projectPath = Path.GetDirectoryName(projectFile).TrimEnd(Path.DirectorySeparatorChar);
 
                     // Send an InitializeMessage for each project
                     var initializeMessage = new InitializeMessage
