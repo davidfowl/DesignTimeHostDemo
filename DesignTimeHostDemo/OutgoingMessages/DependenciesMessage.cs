@@ -6,22 +6,20 @@ using System.Linq;
 
 namespace Microsoft.Framework.DesignTimeHost.Models.OutgoingMessages
 {
-    public class ReferencesMessage
+    public class DependenciesMessage
     {
         public FrameworkData Framework { get; set; }
-        public IList<ProjectReference> ProjectReferences { get; set; }
-        public IList<string> FileReferences { get; set; }
-        public IDictionary<string, byte[]> RawReferences { get; set; }
+        public string RootDependency { get; set; }
+        public IDictionary<string, DependencyDescription> Dependencies { get; set; }
 
         public override bool Equals(object obj)
         {
-            var other = obj as ReferencesMessage;
+            var other = obj as DependenciesMessage;
 
             return other != null &&
+                   string.Equals(RootDependency, other.RootDependency) &&
                    object.Equals(Framework, other.Framework) &&
-                   Enumerable.SequenceEqual(ProjectReferences, other.ProjectReferences) &&
-                   Enumerable.SequenceEqual(FileReferences, other.FileReferences) &&
-                   Enumerable.SequenceEqual(RawReferences, other.RawReferences);
+                   Enumerable.SequenceEqual(Dependencies, other.Dependencies);
         }
 
         public override int GetHashCode()

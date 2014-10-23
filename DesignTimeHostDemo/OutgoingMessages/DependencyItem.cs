@@ -1,25 +1,21 @@
 // Copyright (c) Microsoft Open Technologies, Inc. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
-using System.Collections.Generic;
-using System.Linq;
 
 namespace Microsoft.Framework.DesignTimeHost.Models.OutgoingMessages
 {
-    public class DiagnosticsMessage
+    public class DependencyItem
     {
-        public FrameworkData Framework { get; set; }
+        public string Name { get; set; }
 
-        public IList<string> Warnings { get; set; }
-        public IList<string> Errors { get; set; }
+        public string Version { get; set; }
 
         public override bool Equals(object obj)
         {
-            var other = obj as DiagnosticsMessage;
-
+            var other = obj as DependencyItem;
             return other != null &&
-                 Enumerable.SequenceEqual(Warnings, other.Warnings) &&
-                 Enumerable.SequenceEqual(Errors, other.Errors);
+                   string.Equals(Name, other.Name) &&
+                   object.Equals(Version, other.Version);
         }
 
         public override int GetHashCode()

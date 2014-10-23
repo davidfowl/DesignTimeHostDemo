@@ -37,9 +37,6 @@ namespace DesignTimeHostDemo
             // Show runtime output
             var showRuntimeOutput = true;
 
-            // this can be k10
-            var activeTargetFramework = "net45";
-
             StartRuntime(runtimePath, hostId, port, showRuntimeOutput, () =>
             {
                 var socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
@@ -77,7 +74,7 @@ namespace DesignTimeHostDemo
                     else if (m.MessageType == "Sources")
                     {
                         // The sources to feed to the language service
-                        // var val = m.Payload.ToObject<SourcesMessage>();
+                        var val = m.Payload.ToObject<SourcesMessage>();
                     }
                 };
 
@@ -97,7 +94,6 @@ namespace DesignTimeHostDemo
                     var initializeMessage = new InitializeMessage
                     {
                         ProjectFolder = projectPath,
-                        TargetFramework = activeTargetFramework
                     };
 
                     // Create a unique id for this project
@@ -121,7 +117,6 @@ namespace DesignTimeHostDemo
                     watcher.WatchDirectory(projectPath, ".cs");
 
                     // Watch all directories for cs files
-
                     foreach (var cs in Directory.GetFiles(projectPath, "*.cs", SearchOption.AllDirectories))
                     {
                         watcher.WatchFile(cs);
@@ -169,7 +164,7 @@ namespace DesignTimeHostDemo
                                          string hostId,
                                          int port,
                                          bool verboseOutput,
-                                         Action onStart)
+                                         Action OnStart)
         {
             var psi = new ProcessStartInfo
             {
@@ -180,25 +175,11 @@ namespace DesignTimeHostDemo
                                           port,
                                           Process.GetCurrentProcess().Id,
                                           hostId),
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-                UseShellExecute = false
             };
 
             Console.WriteLine(psi.FileName + " " + psi.Arguments);
 
             var kreProcess = Process.Start(psi);
-            kreProcess.BeginOutputReadLine();
-            kreProcess.BeginErrorReadLine();
-
-            kreProcess.OutputDataReceived += (sender, e) =>
-            {
-                if (verboseOutput)
-                {
-                    Console.WriteLine(e.Data);
-                }
-            };
 
             // Wait a little bit for it to conncet before firing the callback
             Thread.Sleep(1000);
@@ -216,10 +197,10 @@ namespace DesignTimeHostDemo
 
                 Thread.Sleep(1000);
 
-                StartRuntime(runtimePath, hostId, port, verboseOutput, onStart);
+                StartRuntime(runtimePath, hostId, port, verboseOutput, OnStart);
             };
 
-            onStart();
+            OnStart();
         }
 
         private static Task ConnectAsync(Socket socket, IPEndPoint endPoint)
