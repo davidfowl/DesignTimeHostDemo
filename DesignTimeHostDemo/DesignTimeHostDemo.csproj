@@ -40,17 +40,19 @@
     <Reference Include="Microsoft.CSharp" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="OutgoingMessages\CompilationSettings.cs" />
+    <Compile Include="OutgoingMessages\DependenciesMessage.cs" />
+    <Compile Include="OutgoingMessages\DependencyDescription.cs" />
+    <Compile Include="OutgoingMessages\DependencyItem.cs" />
+    <Compile Include="OutgoingMessages\FrameworkData.cs" />
     <Compile Include="FileWatcher.cs" />
     <Compile Include="IncomingMessages\ChangeTargetFrameworkMessage.cs" />
     <Compile Include="IncomingMessages\InitializeMessage.cs" />
     <Compile Include="Message.cs" />
-    <Compile Include="OutgoingMessages\ConfigurationData.cs" />
-    <Compile Include="OutgoingMessages\ConfigurationsMessage.cs" />
     <Compile Include="OutgoingMessages\DiagnosticsMessage.cs" />
     <Compile Include="OutgoingMessages\ErrorMessage.cs" />
-    <Compile Include="OutgoingMessages\ReferenceDescription.cs" />
-    <Compile Include="OutgoingMessages\ReferenceItem.cs" />
+    <Compile Include="OutgoingMessages\OutputsMessage.cs" />
+    <Compile Include="OutgoingMessages\ProjectMessage.cs" />
+    <Compile Include="OutgoingMessages\ProjectReference.cs" />
     <Compile Include="OutgoingMessages\ReferencesMessage.cs" />
     <Compile Include="OutgoingMessages\SourcesMessage.cs" />
     <Compile Include="ProcessingQueue.cs" />
