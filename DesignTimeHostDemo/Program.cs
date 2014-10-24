@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -6,9 +7,9 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using DesignTimeHostDemo.Test;
 using Microsoft.Framework.DesignTimeHost.Models;
 using Microsoft.Framework.DesignTimeHost.Models.IncomingMessages;
-using Microsoft.Framework.DesignTimeHost.Models.OutgoingMessages;
 using Newtonsoft.Json.Linq;
 
 namespace DesignTimeHostDemo
@@ -19,17 +20,26 @@ namespace DesignTimeHostDemo
         {
             if (args.Length < 2)
             {
-                Console.WriteLine("Usage: DesignTimeHostDemo [runtimePath] [solutionPath]");
+                Console.WriteLine("Usage: DesignTimeHostDemo [runtimePath] [solutionPath] [optional switch: -startuptest]");
                 return;
             }
 
             string runtimePath = args[0];
             string applicationRoot = args[1];
+            bool startupTest = false;
 
-            Go(runtimePath, applicationRoot);
+            if (args.Length > 2)
+            {
+                if (!string.IsNullOrEmpty(args[2]) && args[2].Equals("-startuptest", StringComparison.OrdinalIgnoreCase))
+                {
+                    startupTest = true;
+                }
+            }
+
+            Go(runtimePath, applicationRoot, startupTest);
         }
 
-        private static void Go(string runtimePath, string applicationRoot)
+        private static void Go(string runtimePath, string applicationRoot, bool startupTest)
         {
             var hostId = Guid.NewGuid().ToString();
             var port = 1334;
@@ -37,8 +47,8 @@ namespace DesignTimeHostDemo
             // Show runtime output
             var showRuntimeOutput = true;
 
-            // this can be k10
-            var activeTargetFramework = "net45";
+            // test readiness watcher
+            var testReadinessWatcher = new HostReadinessWatcher();
 
             StartRuntime(runtimePath, hostId, port, showRuntimeOutput, () =>
             {
@@ -50,10 +60,13 @@ namespace DesignTimeHostDemo
                 Console.WriteLine("Connected");
 
                 var mapping = new Dictionary<int, string>();
+                var messages = new ConcurrentDictionary<int, List<Message>>();
                 var queue = new ProcessingQueue(networkStream);
 
                 queue.OnReceive += m =>
                 {
+                    testReadinessWatcher.Ping();
+
                     // Get the project associated with this message
                     var projectPath = mapping[m.ContextId];
 
@@ -78,6 +91,15 @@ namespace DesignTimeHostDemo
                     {
                         // The sources to feed to the language service
                         // var val = m.Payload.ToObject<SourcesMessage>();
+
+                        List<Message> messageList;
+                        if (!messages.TryGetValue(m.ContextId, out messageList))
+                        {
+                            messageList = new List<Message>();
+                            messages[m.ContextId] = messageList;
+                        }
+
+                        messageList.Add(m);
                     }
                 };
 
@@ -97,7 +119,6 @@ namespace DesignTimeHostDemo
                     var initializeMessage = new InitializeMessage
                     {
                         ProjectFolder = projectPath,
-                        TargetFramework = activeTargetFramework
                     };
 
                     // Create a unique id for this project
@@ -121,7 +142,6 @@ namespace DesignTimeHostDemo
                     watcher.WatchDirectory(projectPath, ".cs");
 
                     // Watch all directories for cs files
-
                     foreach (var cs in Directory.GetFiles(projectPath, "*.cs", SearchOption.AllDirectories))
                     {
                         watcher.WatchFile(cs);
@@ -152,14 +172,31 @@ namespace DesignTimeHostDemo
                 };
             });
 
-            Console.WriteLine("Process Q to exit");
-
-            while (true)
+            if (!startupTest)
             {
-                var ki = Console.ReadKey(true);
+                // if test module is not given, running in the console mode
+                Console.WriteLine("Process Q to exit");
 
-                if (ki.Key == ConsoleKey.Q)
+                while (true)
                 {
+                    var ki = Console.ReadKey(true);
+
+                    if (ki.Key == ConsoleKey.Q)
+                    {
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                testReadinessWatcher.Start();
+                testReadinessWatcher.Wait();
+                Console.WriteLine("Ready to test");
+
+                // Press anything to continue
+                while (true)
+                {
+                    var ki = Console.ReadKey(true);
                     break;
                 }
             }
@@ -169,7 +206,7 @@ namespace DesignTimeHostDemo
                                          string hostId,
                                          int port,
                                          bool verboseOutput,
-                                         Action onStart)
+                                         Action OnStart)
         {
             var psi = new ProcessStartInfo
             {
@@ -180,25 +217,11 @@ namespace DesignTimeHostDemo
                                           port,
                                           Process.GetCurrentProcess().Id,
                                           hostId),
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-                UseShellExecute = false
             };
 
             Console.WriteLine(psi.FileName + " " + psi.Arguments);
 
             var kreProcess = Process.Start(psi);
-            kreProcess.BeginOutputReadLine();
-            kreProcess.BeginErrorReadLine();
-
-            kreProcess.OutputDataReceived += (sender, e) =>
-            {
-                if (verboseOutput)
-                {
-                    Console.WriteLine(e.Data);
-                }
-            };
 
             // Wait a little bit for it to conncet before firing the callback
             Thread.Sleep(1000);
@@ -216,10 +239,10 @@ namespace DesignTimeHostDemo
 
                 Thread.Sleep(1000);
 
-                StartRuntime(runtimePath, hostId, port, verboseOutput, onStart);
+                StartRuntime(runtimePath, hostId, port, verboseOutput, OnStart);
             };
 
-            onStart();
+            OnStart();
         }
 
         private static Task ConnectAsync(Socket socket, IPEndPoint endPoint)
