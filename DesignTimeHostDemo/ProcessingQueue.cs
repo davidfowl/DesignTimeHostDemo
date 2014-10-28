@@ -1,9 +1,6 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
-using System.Text;
 using System.Threading;
 using Microsoft.Framework.DesignTimeHost.Models;
 using Newtonsoft.Json;
@@ -12,7 +9,6 @@ namespace DesignTimeHostDemo
 {
     public class ProcessingQueue
     {
-        private readonly List<Message> _queue = new List<Message>();
         private readonly BinaryReader _reader;
         private readonly BinaryWriter _writer;
 
@@ -34,7 +30,7 @@ namespace DesignTimeHostDemo
         {
             lock (_writer)
             {
-                Trace.TraceInformation("[ProcessingQueue]: Post({0})", message);
+                Trace.TraceInformation("[ProcessingQueue]: Post({0})", message.MessageType);
                 _writer.Write(JsonConvert.SerializeObject(message));
             }
         }
