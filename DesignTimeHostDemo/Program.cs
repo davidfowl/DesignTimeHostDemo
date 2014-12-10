@@ -5,10 +5,15 @@ using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Text;
 using Microsoft.Framework.DesignTimeHost.Models;
 using Microsoft.Framework.DesignTimeHost.Models.IncomingMessages;
+using Microsoft.Framework.DesignTimeHost.Models.OutgoingMessages;
 using Newtonsoft.Json.Linq;
 
 namespace DesignTimeHostDemo
@@ -17,16 +22,41 @@ namespace DesignTimeHostDemo
     {
         static void Main(string[] args)
         {
-            if (args.Length < 2)
+            if (args.Length < 1)
             {
-                Console.WriteLine("Usage: DesignTimeHostDemo [runtimePath] [solutionPath]");
+                Console.WriteLine("Usage: DesignTimeHostDemo [solutionPath]");
                 return;
             }
 
-            string runtimePath = args[0];
-            string applicationRoot = args[1];
+            string runtimePath = GetRuntimePath();
+            string applicationRoot = args[0];
 
             Go(runtimePath, applicationRoot);
+        }
+
+        private static string GetRuntimePath()
+        {
+            var home = Environment.GetEnvironmentVariable("HOME") ?? Environment.GetEnvironmentVariable("USERPROFILE");
+
+            var kreHome = Path.Combine(home, ".kre");
+
+            var aliasDirectory = Path.Combine(kreHome, "alias");
+
+            var aliasFiles = new[] { "default.alias", "default.txt" };
+
+            foreach (var shortAliasFile in aliasFiles)
+            {
+                var aliasFile = Path.Combine(aliasDirectory, shortAliasFile);
+
+                if (File.Exists(aliasFile))
+                {
+                    var version = File.ReadAllText(aliasFile).Trim();
+
+                    return Path.Combine(kreHome, "packages", version);
+                }
+            }
+
+            throw new InvalidOperationException("Unable to locate default alias");
         }
 
         private static void Go(string runtimePath, string applicationRoot)
@@ -36,6 +66,8 @@ namespace DesignTimeHostDemo
 
             // Show runtime output
             var showRuntimeOutput = true;
+
+            var workspace = new CustomWorkspace();
 
             StartRuntime(runtimePath, hostId, port, showRuntimeOutput, () =>
             {
@@ -47,35 +79,137 @@ namespace DesignTimeHostDemo
                 Console.WriteLine("Connected");
 
                 var mapping = new Dictionary<int, string>();
-                var messages = new ConcurrentDictionary<int, List<Message>>();
+                var projects = new Dictionary<string, int>();
+                var workspaceProjects = new Dictionary<int, ConcurrentDictionary<string, ProjectId>>();
+                var projectReferenceTodos = new ConcurrentDictionary<ProjectId, List<ProjectId>>();
                 var queue = new ProcessingQueue(networkStream);
+
+                var solution = workspace.AddSolution(SolutionInfo.Create(
+                    SolutionId.CreateNewId(),
+                    VersionStamp.Create()));
 
                 queue.OnReceive += m =>
                 {
                     // Get the project associated with this message
                     var projectPath = mapping[m.ContextId];
 
+                    if (m.MessageType == "ProjectInformation")
+                    {
+                        var val = m.Payload.ToObject<ProjectMessage>();
+
+                        foreach (var framework in val.Frameworks)
+                        {
+                            var id = workspaceProjects[m.ContextId].GetOrAdd(framework.FrameworkName, _ => ProjectId.CreateNewId());
+                            var projectInfo = ProjectInfo.Create(
+                                    id,
+                                    VersionStamp.Create(),
+                                    val.Name + "+" + framework.ShortName,
+                                    val.Name,
+                                    LanguageNames.CSharp);
+
+                            solution = solution.AddProject(projectInfo);
+
+                            List<ProjectId> references;
+                            if (projectReferenceTodos.TryGetValue(id, out references))
+                            {
+                                lock (references)
+                                {
+                                    var reference = new Microsoft.CodeAnalysis.ProjectReference(id);
+
+                                    foreach (var referenceId in references)
+                                    {
+                                        var project = solution.GetProject(referenceId);
+                                        project = project.AddProjectReference(reference);
+                                        solution = project.Solution;
+                                    }
+
+                                    references.Clear();
+                                }
+                            }
+                        }
+                    }
                     // This is where we can handle messages and update the
                     // language service
-                    if (m.MessageType == "References")
+                    else if (m.MessageType == "References")
                     {
                         // References as well as the dependency graph information
-                        // var val = m.Payload.ToObject<ReferencesMessage>();
+                        var val = m.Payload.ToObject<ReferencesMessage>();
+
+                        var projectId = workspaceProjects[m.ContextId][val.Framework.FrameworkName];
+
+                        var project = solution.GetProject(projectId);
+
+                        // TODO: Cache these
+                        foreach (var file in val.FileReferences)
+                        {
+                            project = project.AddMetadataReference(MetadataReference.CreateFromFile(file));
+                        }
+
+                        foreach (var rawReference in val.RawReferences)
+                        {
+                            project = project.AddMetadataReference(MetadataReference.CreateFromImage(rawReference.Value));
+                        }
+
+                        foreach (var projectReference in val.ProjectReferences)
+                        {
+                            var projectContextId = projects[Path.GetDirectoryName(projectReference.Path)];
+                            bool exists = true;
+                            var projectReferenceId = workspaceProjects[projectContextId].GetOrAdd(projectReference.Framework.FrameworkName,
+                                _ =>
+                                {
+                                    exists = false;
+                                    return ProjectId.CreateNewId();
+                                });
+
+                            if (exists)
+                            {
+                                project = project.AddProjectReference(new Microsoft.CodeAnalysis.ProjectReference(projectReferenceId));
+                            }
+                            else
+                            {
+                                var references = projectReferenceTodos.GetOrAdd(projectReferenceId, _ => new List<ProjectId>());
+                                lock (references)
+                                {
+                                    references.Add(projectId);
+                                }
+                            }
+
+                        }
+
+                        solution = project.Solution;
                     }
-                    else if (m.MessageType == "Diagnostics")
-                    {
-                        // Errors and warnings
-                        // var val = m.Payload.ToObject<DiagnosticsMessage>();
-                    }
-                    else if (m.MessageType == "Configurations")
+                    else if (m.MessageType == "CompilerOptions")
                     {
                         // Configuration and compiler options
-                        // var val = m.Payload.ToObject<ConfigurationsMessage>();
+                        var val = m.Payload.ToObject<CompilationOptionsMessage>();
+
+                        var projectId = workspaceProjects[m.ContextId][val.Framework.FrameworkName];
+
+                        var project = solution.GetProject(projectId);
+
+                        project = project.WithCompilationOptions(new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+                        solution = project.Solution;
                     }
                     else if (m.MessageType == "Sources")
                     {
                         // The sources to feed to the language service
-                        // var val = m.Payload.ToObject<SourcesMessage>();
+                        var val = m.Payload.ToObject<SourcesMessage>();
+
+                        var projectId = workspaceProjects[m.ContextId][val.Framework.FrameworkName];
+
+                        var project = solution.GetProject(projectId);
+
+                        foreach (var file in val.Files)
+                        {
+                            using (var stream = File.OpenRead(file))
+                            {
+                                var sourceText = SourceText.From(stream, encoding: Encoding.UTF8);
+                                var document = project.AddDocument(file, sourceText);
+                            }
+                        }
+
+                        solution = project.Solution;
                     }
                 };
 
@@ -84,7 +218,6 @@ namespace DesignTimeHostDemo
 
                 var solutionPath = applicationRoot;
                 var watcher = new FileWatcher(solutionPath);
-                var projects = new Dictionary<string, int>();
                 int contextId = 0;
 
                 foreach (var projectFile in Directory.EnumerateFiles(solutionPath, "project.json", SearchOption.AllDirectories))
@@ -103,6 +236,7 @@ namespace DesignTimeHostDemo
                     // Create a mapping from path to contextid and back
                     projects[projectPath] = projectContextId;
                     mapping[projectContextId] = projectPath;
+                    workspaceProjects[projectContextId] = new ConcurrentDictionary<string, ProjectId>();
 
                     // Initialize this project
                     queue.Post(new Message
@@ -170,6 +304,8 @@ namespace DesignTimeHostDemo
             var psi = new ProcessStartInfo
             {
                 FileName = Path.Combine(runtimePath, "bin", "klr.exe"),
+                // CreateNoWindow = true,
+                // UseShellExecute = false,
                 Arguments = String.Format(@"--appbase ""{0}"" {1} {2} {3} {4}",
                                           Directory.GetCurrentDirectory(),
                                           Path.Combine(runtimePath, "bin", "lib", "Microsoft.Framework.DesignTimeHost", "Microsoft.Framework.DesignTimeHost.dll"),
