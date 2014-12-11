@@ -33,6 +33,13 @@ namespace Microsoft.Framework.Runtime.Roslyn
 
     public class WritableCSharpCompilationOptions
     {
-
+        public bool AllowUnsafe { get; set; }
+        public int OutputKind { get; set; }
+        public int Platform { get; set; }
+        public int OptimizationLevel { get; set; }
+        public int WarningLevel { get; set; }
+        public bool ConcurrentBuild { get; set; }
+        public int GeneralDiagnosticOption { get; set; }
+        public Dictionary<string, int> SpecificDiagnosticOptions { get; set; }
     }
 }

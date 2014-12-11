@@ -105,6 +105,7 @@
     <Compile Include="OutgoingMessages\SourcesMessage.cs" />
     <Compile Include="ProcessingQueue.cs" />
     <Compile Include="Program.cs" />
+    <Compile Include="ProjectState.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

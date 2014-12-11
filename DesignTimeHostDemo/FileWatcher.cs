@@ -30,7 +30,7 @@ namespace DesignTimeHostDemo
             _watcher.Created += OnWatcherChanged;
         }
 
-        public event Action<string> OnChanged;
+        public event Action<string, WatcherChangeTypes> OnChanged;
 
         public void WatchDirectory(string path, string extension)
         {
@@ -68,7 +68,7 @@ namespace DesignTimeHostDemo
 
                 if (OnChanged != null)
                 {
-                    OnChanged(oldPath ?? newPath);
+                    OnChanged(oldPath ?? newPath, changeType);
                 }
 
                 return true;
@@ -123,6 +123,12 @@ namespace DesignTimeHostDemo
                 }
 
                 return extensions.Contains(extension);
+            }
+
+            // Trigger directory additions
+            if (changeType == WatcherChangeTypes.Created && !Path.HasExtension(newPath))
+            {
+                return true;
             }
 
             return false;

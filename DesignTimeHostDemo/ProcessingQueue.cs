@@ -37,18 +37,18 @@ namespace DesignTimeHostDemo
 
         private void ReceiveMessages()
         {
-            try
+            while (true)
             {
-                while (true)
+                try
                 {
                     var message = JsonConvert.DeserializeObject<Message>(_reader.ReadString());
                     Trace.TraceInformation("[ProcessingQueue]: OnReceive({0})", message.MessageType);
                     OnReceive(message);
                 }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine(ex.Message);
+                catch (Exception ex)
+                {
+                    Console.WriteLine(ex.Message);
+                }
             }
         }
     }
