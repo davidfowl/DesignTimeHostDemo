@@ -76,7 +76,7 @@ namespace DesignTimeHostDemo
 
             StartRuntime(runtimePath, hostId, port, showRuntimeOutput, () =>
             {
-                var socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
+                var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                 socket.Connect(new IPEndPoint(IPAddress.Loopback, port));
 
                 var networkStream = new NetworkStream(socket);
