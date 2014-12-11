@@ -11,7 +11,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Recommendations;
+using Microsoft.CodeAnalysis.Rename;
 using Microsoft.CodeAnalysis.Text;
 using Microsoft.Framework.DesignTimeHost.Models;
 using Microsoft.Framework.DesignTimeHost.Models.IncomingMessages;
@@ -22,6 +24,9 @@ namespace DesignTimeHostDemo
 {
     class Program
     {
+        static Process _kreProcess;
+        static bool ended = false;
+
         static void Main(string[] args)
         {
             if (args.Length < 1)
@@ -53,6 +58,8 @@ namespace DesignTimeHostDemo
                 if (File.Exists(aliasFile))
                 {
                     var version = File.ReadAllText(aliasFile).Trim();
+
+                    Console.WriteLine("Using KRE version '{0}'.", version);
 
                     return Path.Combine(kreHome, "packages", version);
                 }
@@ -449,7 +456,14 @@ namespace DesignTimeHostDemo
                     //    Console.WriteLine(item.Name);
                     //}
                 }
+                else if (ki.Key == ConsoleKey.F)
+                {
+
+                }
             }
+
+            ended = true;
+            _kreProcess.Kill();
         }
 
         private static int ScanDirectory(string hostId,
@@ -524,7 +538,7 @@ namespace DesignTimeHostDemo
             var psi = new ProcessStartInfo
             {
                 FileName = Path.Combine(runtimePath, "bin", "klr"),
-                CreateNoWindow = true,
+                // CreateNoWindow = true,
                 UseShellExecute = false,
                 Arguments = String.Format(@"{0} {1} {2} {3}",
                                           Path.Combine(runtimePath, "bin", "lib", "Microsoft.Framework.DesignTimeHost", "Microsoft.Framework.DesignTimeHost.dll"),
@@ -538,6 +552,7 @@ namespace DesignTimeHostDemo
             Console.WriteLine(psi.FileName + " " + psi.Arguments);
 
             var kreProcess = Process.Start(psi);
+            _kreProcess = kreProcess;
 
             // Wait a little bit for it to conncet before firing the callback
             Thread.Sleep(1000);
@@ -554,6 +569,11 @@ namespace DesignTimeHostDemo
                 Console.WriteLine("Process crash trying again");
 
                 Thread.Sleep(1000);
+
+                if (ended)
+                {
+                    return;
+                }
 
                 StartRuntime(runtimePath, hostId, port, verboseOutput, OnStart);
             };
