@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Recommendations;
 using Microsoft.CodeAnalysis.Text;
 using Microsoft.Framework.DesignTimeHost.Models;
 using Microsoft.Framework.DesignTimeHost.Models.IncomingMessages;
@@ -433,6 +434,21 @@ namespace DesignTimeHostDemo
                         Console.WriteLine(projectId);
                     }
                 }
+                else if (ki.Key == ConsoleKey.I)
+                {
+                    // Intellisense!
+                    //var project = workspace.CurrentSolution.Projects.First();
+                    //var document = project.Documents.First();
+                    //var sourceText = document.GetTextAsync().Result;
+                    //var position = sourceText.Lines.GetPosition(new LinePosition(8, 25));
+                    //var model = document.GetSemanticModelAsync().Result;
+                    //var symbols = Recommender.GetRecommendedSymbolsAtPosition(model, position, workspace);
+
+                    //foreach (var item in symbols)
+                    //{
+                    //    Console.WriteLine(item.Name);
+                    //}
+                }
             }
         }
 
@@ -507,16 +523,17 @@ namespace DesignTimeHostDemo
         {
             var psi = new ProcessStartInfo
             {
-                FileName = Path.Combine(runtimePath, "bin", "klr.exe"),
-                // CreateNoWindow = true,
-                // UseShellExecute = false,
-                Arguments = String.Format(@"--appbase ""{0}"" {1} {2} {3} {4}",
-                                          Directory.GetCurrentDirectory(),
+                FileName = Path.Combine(runtimePath, "bin", "klr"),
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                Arguments = String.Format(@"{0} {1} {2} {3}",
                                           Path.Combine(runtimePath, "bin", "lib", "Microsoft.Framework.DesignTimeHost", "Microsoft.Framework.DesignTimeHost.dll"),
                                           port,
                                           Process.GetCurrentProcess().Id,
                                           hostId),
             };
+
+            psi.EnvironmentVariables["KRE_APPBASE"] = Directory.GetCurrentDirectory();
 
             Console.WriteLine(psi.FileName + " " + psi.Arguments);
 
