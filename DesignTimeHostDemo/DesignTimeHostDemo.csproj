@@ -86,6 +86,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="MyCustomWorkspace.cs" />
     <Compile Include="OutgoingMessages\CompilationOptionsMessage.cs" />
     <Compile Include="OutgoingMessages\CompilationSettings.cs" />
     <Compile Include="OutgoingMessages\DependenciesMessage.cs" />
