@@ -464,6 +464,7 @@ namespace DesignTimeHostDemo
 
             ended = true;
             _kreProcess.Kill();
+            _kreProcess.WaitForExit();
         }
 
         private static int ScanDirectory(string hostId,
