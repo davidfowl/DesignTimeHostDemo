@@ -72,6 +72,7 @@ namespace DesignTimeHostDemo
             Workspace workspace = null;
             var projects = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             var projectState = new Dictionary<int, ProjectState>();
+            var documents = new Dictionary<string, DocumentId>(StringComparer.OrdinalIgnoreCase);
             var projectReferenceTodos = new ConcurrentDictionary<ProjectId, List<ProjectId>>();
 
             StartRuntime(runtimePath, hostId, port, showRuntimeOutput, () =>
@@ -265,7 +266,6 @@ namespace DesignTimeHostDemo
                         var projectId = state.WorkspaceProjects[val.Framework.FrameworkName];
 
                         var project = solution.GetProject(projectId);
-                        var newProject = project;
 
                         foreach (var file in val.Files)
                         {
@@ -273,17 +273,19 @@ namespace DesignTimeHostDemo
                             {
                                 var sourceText = SourceText.From(stream, encoding: Encoding.UTF8);
                                 var id = DocumentId.CreateNewId(projectId);
-                                var loader = TextLoader.From(TextAndVersion.Create(sourceText, VersionStamp.Create()));
+                                var version = VersionStamp.Create();
+
+                                documents[file] = id;
+
+                                var loader = TextLoader.From(TextAndVersion.Create(sourceText, version));
                                 solution = solution.AddDocument(DocumentInfo.Create(id, file, loader: loader));
                             }
                         }
-
-                        solution = newProject.Solution;
                     }
 
                     bool changed = cw.TryApplyChanges(solution);
 
-                    Console.WriteLine(changed);
+                    Console.WriteLine(m.MessageType + " changed? => " + changed);
                 };
 
                 // Start the message channel
@@ -347,6 +349,20 @@ namespace DesignTimeHostDemo
                 }
                 else if (ki.Key == ConsoleKey.B)
                 {
+                    foreach (var project in workspace.CurrentSolution.Projects)
+                    {
+                        Compilation compilation = project.GetCompilationAsync().Result;
+
+                        Console.WriteLine(project.Name);
+                        var formatter = new DiagnosticFormatter();
+                        foreach (var item in compilation.GetDiagnostics())
+                        {
+                            Console.WriteLine(formatter.Format(item));
+                        }
+                    }
+                }
+                else if (ki.Key == ConsoleKey.P)
+                {
                     Console.WriteLine("Actual project IDs");
                     foreach (var state in projectState.Values)
                     {
@@ -355,7 +371,7 @@ namespace DesignTimeHostDemo
                             Console.WriteLine(id);
                         }
                     }
-                    
+
                     Console.WriteLine("Workspace project IDs");
                     foreach (var projectId in workspace.CurrentSolution.ProjectIds)
                     {
