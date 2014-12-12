@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -11,106 +10,95 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.FindSymbols;
-using Microsoft.CodeAnalysis.Recommendations;
-using Microsoft.CodeAnalysis.Rename;
 using Microsoft.CodeAnalysis.Text;
 using Microsoft.Framework.DesignTimeHost.Models;
 using Microsoft.Framework.DesignTimeHost.Models.IncomingMessages;
 using Microsoft.Framework.DesignTimeHost.Models.OutgoingMessages;
+using Microsoft.Owin.Hosting;
 using Newtonsoft.Json.Linq;
 
 namespace DesignTimeHostDemo
 {
     class Program
     {
-        static Process _kreProcess;
-        static bool ended = false;
-
         static void Main(string[] args)
         {
+            //Debugger.Launch();
+            //Debugger.Break();
+
             if (args.Length < 1)
             {
-                Console.WriteLine("Usage: DesignTimeHostDemo [solutionPath]");
+                Console.WriteLine("Usage: Omnisharp [-s /path/to/sln] [-p PortNumber]");
                 return;
             }
+            string applicationRoot = null;
+            int? serverPort = null;
+            var enumerator = args.GetEnumerator();
 
-            string runtimePath = GetRuntimePath();
-            string applicationRoot = args[0];
-
-            Go(runtimePath, applicationRoot);
-        }
-
-        private static string GetRuntimePath()
-        {
-            var home = Environment.GetEnvironmentVariable("HOME") ?? Environment.GetEnvironmentVariable("USERPROFILE");
-
-            var kreHome = Path.Combine(home, ".kre");
-
-            var aliasDirectory = Path.Combine(kreHome, "alias");
-
-            var aliasFiles = new[] { "default.alias", "default.txt" };
-
-            foreach (var shortAliasFile in aliasFiles)
+            while (enumerator.MoveNext())
             {
-                var aliasFile = Path.Combine(aliasDirectory, shortAliasFile);
-
-                if (File.Exists(aliasFile))
+                var arg = (string)enumerator.Current;
+                if (arg == "-s")
                 {
-                    var version = File.ReadAllText(aliasFile).Trim();
-
-                    Console.WriteLine("Using KRE version '{0}'.", version);
-
-                    return Path.Combine(kreHome, "packages", version);
+                    enumerator.MoveNext();
+                    applicationRoot = Path.GetFullPath((string)enumerator.Current);
+                }
+                else if (arg == "-p")
+                {
+                    enumerator.MoveNext();
+                    serverPort = Int32.Parse((string)enumerator.Current);
                 }
             }
 
-            throw new InvalidOperationException("Unable to locate default alias");
+            Go(applicationRoot, serverPort.Value);
         }
 
-        private static void Go(string runtimePath, string applicationRoot)
+        private static void Go(string applicationRoot, int serverPort)
         {
-            var hostId = Guid.NewGuid().ToString();
-            var port = 1334;
+            var workspace = new MyCustomWorkspace();
 
-            // Show runtime output
-            var showRuntimeOutput = true;
+            Console.WriteLine("OmniSharp server is listening");
+            using (WebApp.Start("http://localhost:" + serverPort, new Startup(workspace).Configuration))
+            {
+                // Initialize ASP.NET 5 projects
+                InitializeAspNet5(applicationRoot, workspace);
 
-            Workspace workspace = null;
-            var projects = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            var projectState = new Dictionary<int, ProjectState>();
+                Console.WriteLine("Solution has finished loading");
 
-            StartRuntime(runtimePath, hostId, port, showRuntimeOutput, () =>
+                while (true)
+                {
+                    Thread.Sleep(5000);
+                }
+            }
+        }
+
+        private static void InitializeAspNet5(string applicationRoot, MyCustomWorkspace workspace)
+        {
+            var context = new AspNet5Context();
+            context.RuntimePath = GetRuntimePath();
+
+            var wh = new ManualResetEventSlim();
+
+            StartRuntime(context.RuntimePath, context.HostId, context.DesignTimeHostPort, () =>
             {
                 var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                socket.Connect(new IPEndPoint(IPAddress.Loopback, port));
+                socket.Connect(new IPEndPoint(IPAddress.Loopback, context.DesignTimeHostPort));
 
                 var networkStream = new NetworkStream(socket);
 
                 Console.WriteLine("Connected");
 
-                var solutionPath = applicationRoot;
-                var watcher = new FileWatcher(solutionPath);
-                var queue = new ProcessingQueue(networkStream);
+                context.Connection = new ProcessingQueue(networkStream);
 
-                var cw = new MyCustomWorkspace();
-
-                workspace = cw;
-
-                queue.OnReceive += m =>
+                context.Connection.OnReceive += m =>
                 {
-                    var state = projectState[m.ContextId];
+                    var project = context.Projects[m.ContextId];
 
                     if (m.MessageType == "ProjectInformation")
                     {
                         var val = m.Payload.ToObject<ProjectMessage>();
 
-                        if (val.GlobalJsonPath != null)
-                        {
-                            watcher.WatchFile(val.GlobalJsonPath);
-                        }
-
-                        var unprocessed = state.ProjectsByFramework.Keys.ToList();
+                        var unprocessed = project.ProjectsByFramework.Keys.ToList();
 
                         foreach (var framework in val.Frameworks)
                         {
@@ -118,7 +106,7 @@ namespace DesignTimeHostDemo
 
                             bool exists = true;
 
-                            var frameworkState = state.ProjectsByFramework.GetOrAdd(framework.FrameworkName, _ =>
+                            var frameworkState = project.ProjectsByFramework.GetOrAdd(framework.FrameworkName, _ =>
                             {
                                 exists = false;
                                 return new FrameworkState();
@@ -139,7 +127,7 @@ namespace DesignTimeHostDemo
                                         val.Name,
                                         LanguageNames.CSharp);
 
-                                cw.AddProject(projectInfo);
+                                workspace.AddProject(projectInfo);
                             }
 
                             lock (frameworkState.PendingProjectReferences)
@@ -148,7 +136,7 @@ namespace DesignTimeHostDemo
 
                                 foreach (var referenceId in frameworkState.PendingProjectReferences)
                                 {
-                                    cw.AddProjectReference(referenceId, reference);
+                                    workspace.AddProjectReference(referenceId, reference);
                                 }
 
                                 frameworkState.PendingProjectReferences.Clear();
@@ -160,8 +148,8 @@ namespace DesignTimeHostDemo
                         foreach (var frameworkName in unprocessed)
                         {
                             FrameworkState frameworkState;
-                            state.ProjectsByFramework.TryRemove(frameworkName, out frameworkState);
-                            cw.RemoveProject(frameworkState.ProjectId);
+                            project.ProjectsByFramework.TryRemove(frameworkName, out frameworkState);
+                            workspace.RemoveProject(frameworkState.ProjectId);
                         }
                     }
                     // This is where we can handle messages and update the
@@ -171,7 +159,7 @@ namespace DesignTimeHostDemo
                         // References as well as the dependency graph information
                         var val = m.Payload.ToObject<ReferencesMessage>();
 
-                        var frameworkState = state.ProjectsByFramework[val.Framework.FrameworkName];
+                        var frameworkState = project.ProjectsByFramework[val.Framework.FrameworkName];
                         var projectId = frameworkState.ProjectId;
 
                         var metadataReferences = new List<MetadataReference>();
@@ -212,10 +200,10 @@ namespace DesignTimeHostDemo
                                 continue;
                             }
 
-                            var projectReferenceContextId = projects[projectReference.Path];
+                            var projectReferenceContextId = context.ProjectContextMapping[projectReference.Path];
                             bool exists = true;
 
-                            var referencedProject = projectState[projectReferenceContextId].ProjectsByFramework.GetOrAdd(projectReference.Framework.FrameworkName,
+                            var referencedProject = context.Projects[projectReferenceContextId].ProjectsByFramework.GetOrAdd(projectReference.Framework.FrameworkName,
                                 _ =>
                                 {
                                     exists = false;
@@ -241,29 +229,29 @@ namespace DesignTimeHostDemo
 
                         foreach (var reference in metadataReferences)
                         {
-                            cw.AddMetadataReference(projectId, reference);
+                            workspace.AddMetadataReference(projectId, reference);
                         }
 
                         foreach (var projectReference in projectReferences)
                         {
-                            cw.AddProjectReference(projectId, projectReference);
+                            workspace.AddProjectReference(projectId, projectReference);
                         }
 
                         foreach (var pair in removedProjectReferences)
                         {
-                            cw.RemoveProjectReference(projectId, new Microsoft.CodeAnalysis.ProjectReference(pair.Value));
+                            workspace.RemoveProjectReference(projectId, new Microsoft.CodeAnalysis.ProjectReference(pair.Value));
                             frameworkState.ProjectReferences.Remove(pair.Key);
                         }
 
                         foreach (var pair in removedFileReferences)
                         {
-                            cw.RemoveMetadataReference(projectId, pair.Value);
+                            workspace.RemoveMetadataReference(projectId, pair.Value);
                             frameworkState.FileReferences.Remove(pair.Key);
                         }
 
                         foreach (var pair in removedRawReferences)
                         {
-                            cw.RemoveMetadataReference(projectId, pair.Value);
+                            workspace.RemoveMetadataReference(projectId, pair.Value);
                             frameworkState.RawReferences.Remove(pair.Key);
                         }
                     }
@@ -272,7 +260,7 @@ namespace DesignTimeHostDemo
                         // Configuration and compiler options
                         var val = m.Payload.ToObject<CompilationOptionsMessage>();
 
-                        var projectId = state.ProjectsByFramework[val.Framework.FrameworkName].ProjectId;
+                        var projectId = project.ProjectsByFramework[val.Framework.FrameworkName].ProjectId;
 
                         var options = val.CompilationOptions.CompilationOptions;
 
@@ -290,14 +278,18 @@ namespace DesignTimeHostDemo
                                 specificDiagnosticOptions: specificDiagnosticOptions
                             );
 
-                        cw.SetCompilationOptions(projectId, csharpOptions);
+                        var parseOptions = new CSharpParseOptions(val.CompilationOptions.LanguageVersion,
+                                                                  preprocessorSymbols: val.CompilationOptions.Defines);
+
+                        workspace.SetCompilationOptions(projectId, csharpOptions);
+                        workspace.SetParseOptions(projectId, parseOptions);
                     }
                     else if (m.MessageType == "Sources")
                     {
                         // The sources to feed to the language service
                         var val = m.Payload.ToObject<SourcesMessage>();
 
-                        var frameworkState = state.ProjectsByFramework[val.Framework.FrameworkName];
+                        var frameworkState = project.ProjectsByFramework[val.Framework.FrameworkName];
                         var projectId = frameworkState.ProjectId;
 
                         var unprocessed = new HashSet<string>(frameworkState.Documents.Keys);
@@ -318,8 +310,7 @@ namespace DesignTimeHostDemo
                                 frameworkState.Documents[file] = id;
 
                                 var loader = TextLoader.From(TextAndVersion.Create(sourceText, version));
-
-                                cw.AddDocument(DocumentInfo.Create(id, file, loader: loader));
+                                workspace.AddDocument(DocumentInfo.Create(id, file, filePath: file, loader: loader));
                             }
                         }
 
@@ -327,158 +318,35 @@ namespace DesignTimeHostDemo
                         {
                             var docId = frameworkState.Documents[file];
                             frameworkState.Documents.Remove(file);
-                            cw.RemoveDocument(docId);
+                            workspace.RemoveDocument(docId);
                         }
+
+                        frameworkState.Loaded = true;
+                    }
+
+                    if (project.ProjectsByFramework.Values.All(p => p.Loaded))
+                    {
+                        wh.Set();
                     }
                 };
 
                 // Start the message channel
-                queue.Start();
+                context.Connection.Start();
 
-                int contextId = ScanDirectory(hostId,
-                                                  projects,
-                                                  projectState,
-                                                  solutionPath,
-                                                  watcher,
-                                                  queue,
-                                                  0);
-
-                // When there's a file change
-                watcher.OnChanged += (changedPath, changeType) =>
-                {
-                    Console.WriteLine("OnChanged({0}, {1})", changedPath, changeType);
-
-                    bool anyProjectChanged = false;
-
-                    foreach (var project in projects)
-                    {
-                        var directory = Path.GetDirectoryName(project.Key) + Path.DirectorySeparatorChar;
-
-                        if (changedPath.StartsWith(directory))
-                        {
-                            queue.Post(new Message
-                            {
-                                ContextId = project.Value,
-                                MessageType = "FilesChanged",
-                                HostId = hostId
-                            });
-
-                            anyProjectChanged = true;
-
-                            foreach (var frameworkState in projectState[project.Value].ProjectsByFramework.Values)
-                            {
-                                DocumentId documentId;
-                                if (frameworkState.Documents.TryGetValue(changedPath, out documentId))
-                                {
-                                    using (var stream = File.OpenRead(changedPath))
-                                    {
-                                        var sourceText = SourceText.From(stream, encoding: Encoding.UTF8);
-                                        cw.OnDocumentChanged(documentId, sourceText);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if (!anyProjectChanged)
-                    {
-                        if (changeType == WatcherChangeTypes.Created)
-                        {
-                            contextId = ScanDirectory(hostId,
-                                                      projects,
-                                                      projectState,
-                                                      solutionPath,
-                                                      watcher,
-                                                      queue,
-                                                      contextId);
-                        }
-                    }
-                };
+                ScanForAspNet5Projects(context, applicationRoot);
             });
 
-            Console.WriteLine("Process Q to exit");
-
-            while (true)
-            {
-                var ki = Console.ReadKey(true);
-
-                if (ki.Key == ConsoleKey.Q)
-                {
-                    break;
-                }
-                else if (ki.Key == ConsoleKey.B)
-                {
-                    foreach (var project in workspace.CurrentSolution.Projects)
-                    {
-                        Compilation compilation = project.GetCompilationAsync().Result;
-
-                        Console.WriteLine(project.Name);
-                        var formatter = new DiagnosticFormatter();
-                        foreach (var item in compilation.GetDiagnostics())
-                        {
-                            Console.WriteLine(formatter.Format(item));
-                        }
-                    }
-                }
-                else if (ki.Key == ConsoleKey.P)
-                {
-                    Console.WriteLine("Actual project IDs");
-                    foreach (var state in projectState.Values)
-                    {
-                        foreach (var project in state.ProjectsByFramework.Values)
-                        {
-                            Console.WriteLine(project.ProjectId);
-                        }
-                    }
-
-                    Console.WriteLine("Workspace project IDs");
-                    foreach (var projectId in workspace.CurrentSolution.ProjectIds)
-                    {
-                        Console.WriteLine(projectId);
-                    }
-                }
-                else if (ki.Key == ConsoleKey.I)
-                {
-                    // Intellisense!
-                    //var project = workspace.CurrentSolution.Projects.First();
-                    //var document = project.Documents.First();
-                    //var sourceText = document.GetTextAsync().Result;
-                    //var position = sourceText.Lines.GetPosition(new LinePosition(8, 25));
-                    //var model = document.GetSemanticModelAsync().Result;
-                    //var symbols = Recommender.GetRecommendedSymbolsAtPosition(model, position, workspace);
-
-                    //foreach (var item in symbols)
-                    //{
-                    //    Console.WriteLine(item.Name);
-                    //}
-                }
-                else if (ki.Key == ConsoleKey.F)
-                {
-
-                }
-            }
-
-            ended = true;
-            _kreProcess.Kill();
-            _kreProcess.WaitForExit();
+            wh.Wait();
         }
 
-        private static int ScanDirectory(string hostId,
-                                         Dictionary<string, int> projects,
-                                         Dictionary<int, ProjectState> projectState,
-                                         string path,
-                                         FileWatcher watcher,
-                                         ProcessingQueue queue,
-                                         int contextId)
+        private static void ScanForAspNet5Projects(AspNet5Context context, string applicationRoot)
         {
-            if (!Directory.Exists(path))
-            {
-                return contextId;
-            }
+            Console.WriteLine("Scanning {0} for ASP.NET 5 projects", applicationRoot);
 
-            foreach (var projectFile in Directory.EnumerateFiles(path, "project.json", SearchOption.AllDirectories))
+            foreach (var projectFile in Directory.EnumerateFiles(applicationRoot, "project.json", SearchOption.AllDirectories))
             {
-                if (projects.ContainsKey(projectFile))
+                int contextId;
+                if (!context.TryAddProject(projectFile, out contextId))
                 {
                     continue;
                 }
@@ -491,53 +359,31 @@ namespace DesignTimeHostDemo
                     ProjectFolder = projectPath,
                 };
 
-                // Create a unique id for this project
-                int projectContextId = contextId++;
-
-                // Create a mapping from path to contextid and back
-                projects[projectFile] = projectContextId;
-                projectState[projectContextId] = new ProjectState();
-
                 // Initialize this project
-                queue.Post(new Message
+                context.Connection.Post(new Message
                 {
-                    ContextId = projectContextId,
+                    ContextId = contextId,
                     MessageType = "Initialize",
                     Payload = JToken.FromObject(initializeMessage),
-                    HostId = hostId
+                    HostId = context.HostId
                 });
 
-                // Watch the project.json file
-                watcher.WatchFile(Path.Combine(projectPath, "project.json"));
-                watcher.WatchDirectory(projectPath, ".cs");
-
-                // Watch all directories for cs files
-                foreach (var cs in Directory.GetFiles(projectPath, "*.cs", SearchOption.AllDirectories))
-                {
-                    watcher.WatchFile(cs);
-                }
-
-                foreach (var d in Directory.GetDirectories(projectPath, "*.*", SearchOption.AllDirectories))
-                {
-                    watcher.WatchDirectory(d, ".cs");
-                }
+                Console.WriteLine("Detected {0}", projectFile);
             }
-
-            return contextId;
         }
 
         private static void StartRuntime(string runtimePath,
                                          string hostId,
                                          int port,
-                                         bool verboseOutput,
                                          Action OnStart)
         {
             var psi = new ProcessStartInfo
             {
                 FileName = Path.Combine(runtimePath, "bin", "klr"),
-                // CreateNoWindow = true,
+                CreateNoWindow = true,
                 UseShellExecute = false,
-                Arguments = String.Format(@"{0} {1} {2} {3}",
+                RedirectStandardError = true,
+                Arguments = string.Format(@"{0} {1} {2} {3}",
                                           Path.Combine(runtimePath, "bin", "lib", "Microsoft.Framework.DesignTimeHost", "Microsoft.Framework.DesignTimeHost.dll"),
                                           port,
                                           Process.GetCurrentProcess().Id,
@@ -549,7 +395,6 @@ namespace DesignTimeHostDemo
             Console.WriteLine(psi.FileName + " " + psi.Arguments);
 
             var kreProcess = Process.Start(psi);
-            _kreProcess = kreProcess;
 
             // Wait a little bit for it to conncet before firing the callback
             Thread.Sleep(1000);
@@ -567,12 +412,7 @@ namespace DesignTimeHostDemo
 
                 Thread.Sleep(1000);
 
-                if (ended)
-                {
-                    return;
-                }
-
-                StartRuntime(runtimePath, hostId, port, verboseOutput, OnStart);
+                StartRuntime(runtimePath, hostId, port, OnStart);
             };
 
             OnStart();
@@ -581,6 +421,75 @@ namespace DesignTimeHostDemo
         private static Task ConnectAsync(Socket socket, IPEndPoint endPoint)
         {
             return Task.Factory.FromAsync((cb, state) => socket.BeginConnect(endPoint, cb, state), ar => socket.EndConnect(ar), null);
+        }
+
+        private static string GetRuntimePath()
+        {
+            var home = Environment.GetEnvironmentVariable("HOME") ?? Environment.GetEnvironmentVariable("USERPROFILE");
+
+            var kreHome = Path.Combine(home, ".kre");
+
+            var aliasDirectory = Path.Combine(kreHome, "alias");
+
+            var aliasFiles = new[] { "default.alias", "default.txt" };
+
+            foreach (var shortAliasFile in aliasFiles)
+            {
+                var aliasFile = Path.Combine(aliasDirectory, shortAliasFile);
+
+                if (File.Exists(aliasFile))
+                {
+                    var version = File.ReadAllText(aliasFile).Trim();
+
+                    Console.WriteLine("Using KRE version '{0}'.", version);
+
+                    return Path.Combine(kreHome, "packages", version);
+                }
+            }
+
+            throw new InvalidOperationException("Unable to locate default alias");
+        }
+
+        public class AspNet5Context
+        {
+            private int _contextId;
+
+            public string RuntimePath { get; set; }
+
+            public string HostId { get; private set; }
+
+            public int DesignTimeHostPort { get; set; }
+
+            public Dictionary<string, int> ProjectContextMapping { get; set; }
+
+            public Dictionary<int, ProjectState> Projects { get; set; }
+
+            public ProcessingQueue Connection { get; set; }
+
+            public AspNet5Context()
+            {
+                HostId = Guid.NewGuid().ToString();
+                DesignTimeHostPort = 1334;
+                ProjectContextMapping = new Dictionary<string, int>();
+                Projects = new Dictionary<int, ProjectState>();
+            }
+
+            public bool TryAddProject(string projectFile, out int contextId)
+            {
+                contextId = -1;
+                if (ProjectContextMapping.ContainsKey(projectFile))
+                {
+                    return false;
+                }
+
+                contextId = ++_contextId;
+
+                // Create a mapping from path to contextid and back
+                ProjectContextMapping[projectFile] = contextId;
+                Projects[contextId] = new ProjectState();
+
+                return true;
+            }
         }
     }
 }

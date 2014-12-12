@@ -1,11 +1,6 @@
-﻿using System;
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
-using Microsoft.Framework.DesignTimeHost.Models.OutgoingMessages;
 
 namespace DesignTimeHostDemo
 {
@@ -32,6 +27,8 @@ namespace DesignTimeHostDemo
         public Dictionary<string, ProjectId> ProjectReferences { get; set; }
 
         public List<ProjectId> PendingProjectReferences { get; set; }
+
+        public bool Loaded { get; set; }
 
         public FrameworkState()
         {

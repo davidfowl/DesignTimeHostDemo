@@ -1,4 +1,7 @@
-﻿using Microsoft.CodeAnalysis;
+﻿using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Collections.Immutable;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Host.Mef;
 using Microsoft.CodeAnalysis.Text;
 
@@ -54,6 +57,11 @@ namespace DesignTimeHostDemo
         public void SetCompilationOptions(ProjectId projectId, CompilationOptions options)
         {
             OnCompilationOptionsChanged(projectId, options);
+        }
+
+        public void SetParseOptions(ProjectId projectId, ParseOptions parseOptions)
+        {
+            OnParseOptionsChanged(projectId, parseOptions);
         }
 
         public void OnDocumentChanged(DocumentId documentId, SourceText text)

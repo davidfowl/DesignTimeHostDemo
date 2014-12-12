@@ -22,7 +22,7 @@ namespace DesignTimeHostDemo
 
         public void Start()
         {
-            Trace.TraceInformation("[ProcessingQueue]: Start()");
+            Console.WriteLine("[ProcessingQueue]: Start()");
             new Thread(ReceiveMessages) { IsBackground = true }.Start();
         }
 
@@ -30,7 +30,7 @@ namespace DesignTimeHostDemo
         {
             lock (_writer)
             {
-                Trace.TraceInformation("[ProcessingQueue]: Post({0})", message.MessageType);
+                Console.WriteLine("[ProcessingQueue]: Post({0})", message.MessageType);
                 _writer.Write(JsonConvert.SerializeObject(message));
             }
         }
@@ -42,7 +42,6 @@ namespace DesignTimeHostDemo
                 try
                 {
                     var message = JsonConvert.DeserializeObject<Message>(_reader.ReadString());
-                    Trace.TraceInformation("[ProcessingQueue]: OnReceive({0})", message.MessageType);
                     OnReceive(message);
                 }
                 catch (IOException)
