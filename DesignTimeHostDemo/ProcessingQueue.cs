@@ -45,6 +45,10 @@ namespace DesignTimeHostDemo
                     Trace.TraceInformation("[ProcessingQueue]: OnReceive({0})", message.MessageType);
                     OnReceive(message);
                 }
+                catch (IOException)
+                {
+                    break;
+                }
                 catch (Exception ex)
                 {
                     Console.WriteLine(ex.Message);

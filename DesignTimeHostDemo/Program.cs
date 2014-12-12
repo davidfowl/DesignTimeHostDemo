@@ -79,7 +79,6 @@ namespace DesignTimeHostDemo
             Workspace workspace = null;
             var projects = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             var projectState = new Dictionary<int, ProjectState>();
-            var projectReferenceTodos = new ConcurrentDictionary<ProjectId, List<ProjectId>>();
 
             StartRuntime(runtimePath, hostId, port, showRuntimeOutput, () =>
             {
@@ -119,13 +118,13 @@ namespace DesignTimeHostDemo
 
                             bool exists = true;
 
-                            var project = state.ProjectsByFramework.GetOrAdd(framework.FrameworkName, _ =>
+                            var frameworkState = state.ProjectsByFramework.GetOrAdd(framework.FrameworkName, _ =>
                             {
                                 exists = false;
                                 return new FrameworkState();
                             });
 
-                            var id = project.ProjectId;
+                            var id = frameworkState.ProjectId;
 
                             if (exists)
                             {
@@ -143,20 +142,16 @@ namespace DesignTimeHostDemo
                                 cw.AddProject(projectInfo);
                             }
 
-                            List<ProjectId> references;
-                            if (projectReferenceTodos.TryGetValue(id, out references))
+                            lock (frameworkState.PendingProjectReferences)
                             {
-                                lock (references)
+                                var reference = new Microsoft.CodeAnalysis.ProjectReference(id);
+
+                                foreach (var referenceId in frameworkState.PendingProjectReferences)
                                 {
-                                    var reference = new Microsoft.CodeAnalysis.ProjectReference(id);
-
-                                    foreach (var referenceId in references)
-                                    {
-                                        cw.AddProjectReference(referenceId, reference);
-                                    }
-
-                                    references.Clear();
+                                    cw.AddProjectReference(referenceId, reference);
                                 }
+
+                                frameworkState.PendingProjectReferences.Clear();
                             }
 
                         }
@@ -217,17 +212,17 @@ namespace DesignTimeHostDemo
                                 continue;
                             }
 
-                            var projectContextId = projects[projectReference.Path];
+                            var projectReferenceContextId = projects[projectReference.Path];
                             bool exists = true;
 
-                            var otherProject = projectState[projectContextId].ProjectsByFramework.GetOrAdd(projectReference.Framework.FrameworkName,
+                            var referencedProject = projectState[projectReferenceContextId].ProjectsByFramework.GetOrAdd(projectReference.Framework.FrameworkName,
                                 _ =>
                                 {
                                     exists = false;
                                     return new FrameworkState();
                                 });
 
-                            var projectReferenceId = otherProject.ProjectId;
+                            var projectReferenceId = referencedProject.ProjectId;
 
                             if (exists)
                             {
@@ -235,10 +230,9 @@ namespace DesignTimeHostDemo
                             }
                             else
                             {
-                                var references = projectReferenceTodos.GetOrAdd(projectReferenceId, _ => new List<ProjectId>());
-                                lock (references)
+                                lock (referencedProject.PendingProjectReferences)
                                 {
-                                    references.Add(projectId);
+                                    referencedProject.PendingProjectReferences.Add(projectId);
                                 }
                             }
 
@@ -352,6 +346,8 @@ namespace DesignTimeHostDemo
                 // When there's a file change
                 watcher.OnChanged += (changedPath, changeType) =>
                 {
+                    Console.WriteLine("OnChanged({0}, {1})", changedPath, changeType);
+
                     bool anyProjectChanged = false;
 
                     foreach (var project in projects)
@@ -389,12 +385,12 @@ namespace DesignTimeHostDemo
                         if (changeType == WatcherChangeTypes.Created)
                         {
                             contextId = ScanDirectory(hostId,
-                                                          projects,
-                                                          projectState,
-                                                          solutionPath,
-                                                          watcher,
-                                                          queue,
-                                                          contextId);
+                                                      projects,
+                                                      projectState,
+                                                      solutionPath,
+                                                      watcher,
+                                                      queue,
+                                                      contextId);
                         }
                     }
                 };

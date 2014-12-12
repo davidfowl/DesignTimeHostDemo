@@ -31,6 +31,8 @@ namespace DesignTimeHostDemo
 
         public Dictionary<string, ProjectId> ProjectReferences { get; set; }
 
+        public List<ProjectId> PendingProjectReferences { get; set; }
+
         public FrameworkState()
         {
             ProjectId = ProjectId.CreateNewId();
@@ -38,6 +40,7 @@ namespace DesignTimeHostDemo
             FileReferences = new Dictionary<string, MetadataReference>();
             RawReferences = new Dictionary<string, MetadataReference>();
             ProjectReferences = new Dictionary<string, ProjectId>();
+            PendingProjectReferences = new List<ProjectId>();
         }
     }
 }
