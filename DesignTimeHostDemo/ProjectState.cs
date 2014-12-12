@@ -6,6 +6,8 @@ namespace DesignTimeHostDemo
 {
     public class ProjectState
     {
+        public int ContextId { get; set; }
+
         public string Path { get; set; }
 
         public ConcurrentDictionary<string, FrameworkState> ProjectsByFramework { get; private set; }
@@ -32,10 +34,13 @@ namespace DesignTimeHostDemo
 
         public List<ProjectId> PendingProjectReferences { get; set; }
 
+        public ProjectState ProjectState { get; private set; }
+
         public bool Loaded { get; set; }
 
-        public FrameworkState()
+        public FrameworkState(ProjectState projectState)
         {
+            ProjectState = projectState;
             ProjectId = ProjectId.CreateNewId();
             Documents = new Dictionary<string, DocumentId>();
             FileReferences = new Dictionary<string, MetadataReference>();

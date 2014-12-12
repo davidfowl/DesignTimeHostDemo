@@ -110,13 +110,13 @@ namespace DesignTimeHostDemo
                         foreach (var framework in val.Frameworks)
                         {
                             unprocessed.Remove(framework.FrameworkName);
-                            
-                            var frameworkState = project.ProjectsByFramework.GetOrAdd(framework.FrameworkName, _ =>
+
+                            var frameworkProject = project.ProjectsByFramework.GetOrAdd(framework.FrameworkName, _ =>
                             {
-                                return new FrameworkState();
+                                return new FrameworkState(project);
                             });
 
-                            var id = frameworkState.ProjectId;
+                            var id = frameworkProject.ProjectId;
 
                             if (workspace.CurrentSolution.ContainsProject(id))
                             {
@@ -132,18 +132,19 @@ namespace DesignTimeHostDemo
                                         LanguageNames.CSharp);
 
                                 workspace.AddProject(projectInfo);
+                                context.WorkspaceMapping[id] = frameworkProject;
                             }
 
-                            lock (frameworkState.PendingProjectReferences)
+                            lock (frameworkProject.PendingProjectReferences)
                             {
                                 var reference = new Microsoft.CodeAnalysis.ProjectReference(id);
 
-                                foreach (var referenceId in frameworkState.PendingProjectReferences)
+                                foreach (var referenceId in frameworkProject.PendingProjectReferences)
                                 {
                                     workspace.AddProjectReference(referenceId, reference);
                                 }
 
-                                frameworkState.PendingProjectReferences.Clear();
+                                frameworkProject.PendingProjectReferences.Clear();
                             }
 
                         }
@@ -151,9 +152,9 @@ namespace DesignTimeHostDemo
                         // Remove old projects
                         foreach (var frameworkName in unprocessed)
                         {
-                            FrameworkState frameworkState;
-                            project.ProjectsByFramework.TryRemove(frameworkName, out frameworkState);
-                            workspace.RemoveProject(frameworkState.ProjectId);
+                            FrameworkState frameworkProject;
+                            project.ProjectsByFramework.TryRemove(frameworkName, out frameworkProject);
+                            workspace.RemoveProject(frameworkProject.ProjectId);
                         }
                     }
                     // This is where we can handle messages and update the
@@ -163,15 +164,15 @@ namespace DesignTimeHostDemo
                         // References as well as the dependency graph information
                         var val = m.Payload.ToObject<ReferencesMessage>();
 
-                        var frameworkState = project.ProjectsByFramework[val.Framework.FrameworkName];
-                        var projectId = frameworkState.ProjectId;
+                        var frameworkProject = project.ProjectsByFramework[val.Framework.FrameworkName];
+                        var projectId = frameworkProject.ProjectId;
 
                         var metadataReferences = new List<MetadataReference>();
                         var projectReferences = new List<Microsoft.CodeAnalysis.ProjectReference>();
 
-                        var removedFileReferences = frameworkState.FileReferences.ToDictionary(p => p.Key, p => p.Value);
-                        var removedRawReferences = frameworkState.RawReferences.ToDictionary(p => p.Key, p => p.Value);
-                        var removedProjectReferences = frameworkState.ProjectReferences.ToDictionary(p => p.Key, p => p.Value);
+                        var removedFileReferences = frameworkProject.FileReferences.ToDictionary(p => p.Key, p => p.Value);
+                        var removedRawReferences = frameworkProject.RawReferences.ToDictionary(p => p.Key, p => p.Value);
+                        var removedProjectReferences = frameworkProject.ProjectReferences.ToDictionary(p => p.Key, p => p.Value);
 
                         foreach (var file in val.FileReferences)
                         {
@@ -181,7 +182,7 @@ namespace DesignTimeHostDemo
                             }
 
                             var metadataReference = MetadataReference.CreateFromFile(file);
-                            frameworkState.FileReferences[file] = metadataReference;
+                            frameworkProject.FileReferences[file] = metadataReference;
                             metadataReferences.Add(metadataReference);
                         }
 
@@ -193,7 +194,7 @@ namespace DesignTimeHostDemo
                             }
 
                             var metadataReference = MetadataReference.CreateFromImage(rawReference.Value);
-                            frameworkState.RawReferences[rawReference.Key] = metadataReference;
+                            frameworkProject.RawReferences[rawReference.Key] = metadataReference;
                             metadataReferences.Add(metadataReference);
                         }
 
@@ -207,11 +208,13 @@ namespace DesignTimeHostDemo
                             var projectReferenceContextId = context.ProjectContextMapping[projectReference.Path];
                             bool exists = true;
 
-                            var referencedProject = context.Projects[projectReferenceContextId].ProjectsByFramework.GetOrAdd(projectReference.Framework.FrameworkName,
+                            var referencedProjectState = context.Projects[projectReferenceContextId];
+
+                            var referencedProject = referencedProjectState.ProjectsByFramework.GetOrAdd(projectReference.Framework.FrameworkName,
                                 _ =>
                                 {
                                     exists = false;
-                                    return new FrameworkState();
+                                    return new FrameworkState(referencedProjectState);
                                 });
 
                             var projectReferenceId = referencedProject.ProjectId;
@@ -229,7 +232,7 @@ namespace DesignTimeHostDemo
                             }
                             referencedProject.ProjectDependeees.Add(project.Path);
 
-                            frameworkState.ProjectReferences[projectReference.Path] = projectReferenceId;
+                            frameworkProject.ProjectReferences[projectReference.Path] = projectReferenceId;
                         }
 
                         foreach (var reference in metadataReferences)
@@ -245,19 +248,19 @@ namespace DesignTimeHostDemo
                         foreach (var pair in removedProjectReferences)
                         {
                             workspace.RemoveProjectReference(projectId, new Microsoft.CodeAnalysis.ProjectReference(pair.Value));
-                            frameworkState.ProjectReferences.Remove(pair.Key);
+                            frameworkProject.ProjectReferences.Remove(pair.Key);
                         }
 
                         foreach (var pair in removedFileReferences)
                         {
                             workspace.RemoveMetadataReference(projectId, pair.Value);
-                            frameworkState.FileReferences.Remove(pair.Key);
+                            frameworkProject.FileReferences.Remove(pair.Key);
                         }
 
                         foreach (var pair in removedRawReferences)
                         {
                             workspace.RemoveMetadataReference(projectId, pair.Value);
-                            frameworkState.RawReferences.Remove(pair.Key);
+                            frameworkProject.RawReferences.Remove(pair.Key);
                         }
                     }
                     else if (m.MessageType == "CompilerOptions")
@@ -294,10 +297,10 @@ namespace DesignTimeHostDemo
                         // The sources to feed to the language service
                         var val = m.Payload.ToObject<SourcesMessage>();
 
-                        var frameworkState = project.ProjectsByFramework[val.Framework.FrameworkName];
-                        var projectId = frameworkState.ProjectId;
+                        var frameworkProject = project.ProjectsByFramework[val.Framework.FrameworkName];
+                        var projectId = frameworkProject.ProjectId;
 
-                        var unprocessed = new HashSet<string>(frameworkState.Documents.Keys);
+                        var unprocessed = new HashSet<string>(frameworkProject.Documents.Keys);
 
                         foreach (var file in val.Files)
                         {
@@ -312,7 +315,7 @@ namespace DesignTimeHostDemo
                                 var id = DocumentId.CreateNewId(projectId);
                                 var version = VersionStamp.Create();
 
-                                frameworkState.Documents[file] = id;
+                                frameworkProject.Documents[file] = id;
 
                                 var loader = TextLoader.From(TextAndVersion.Create(sourceText, version));
                                 workspace.AddDocument(DocumentInfo.Create(id, file, filePath: file, loader: loader));
@@ -321,12 +324,12 @@ namespace DesignTimeHostDemo
 
                         foreach (var file in unprocessed)
                         {
-                            var docId = frameworkState.Documents[file];
-                            frameworkState.Documents.Remove(file);
+                            var docId = frameworkProject.Documents[file];
+                            frameworkProject.Documents.Remove(file);
                             workspace.RemoveDocument(docId);
                         }
 
-                        frameworkState.Loaded = true;
+                        frameworkProject.Loaded = true;
                     }
 
                     if (project.ProjectsByFramework.Values.All(p => p.Loaded))
@@ -343,6 +346,24 @@ namespace DesignTimeHostDemo
             });
 
             wh.Wait();
+
+            // TODO: Subscribe to workspace changes and update DTH
+            //Thread.Sleep(5000);
+
+            //workspace.WorkspaceChanged += (sender, e) =>
+            //{
+            //    var arg = e;
+            //    var kind = e.Kind;
+
+            //    if (e.Kind == WorkspaceChangeKind.DocumentChanged || 
+            //        e.Kind == WorkspaceChangeKind.DocumentAdded || 
+            //        e.Kind == WorkspaceChangeKind.DocumentRemoved)
+            //    {
+            //        var frameworkProject = context.WorkspaceMapping[e.ProjectId];
+
+            //        TriggerDependeees(context, frameworkProject.ProjectState.Path);
+            //    }
+            //};
         }
 
         private static void OnDependenciesChanged(AspNet5Context context, string path, WatcherChangeTypes changeType)
@@ -375,9 +396,9 @@ namespace DesignTimeHostDemo
                 {
                     results.Add(contextId);
 
-                    foreach (var frameworkState in context.Projects[contextId].ProjectsByFramework.Values)
+                    foreach (var frameworkProject in context.Projects[contextId].ProjectsByFramework.Values)
                     {
-                        foreach (var dependee in frameworkState.ProjectDependeees)
+                        foreach (var dependee in frameworkProject.ProjectDependeees)
                         {
                             stack.Push(dependee);
                         }
@@ -521,6 +542,8 @@ namespace DesignTimeHostDemo
 
             public Dictionary<int, ProjectState> Projects { get; set; }
 
+            public Dictionary<ProjectId, FrameworkState> WorkspaceMapping { get; set; }
+
             public ProcessingQueue Connection { get; set; }
 
             public AspNet5Context()
@@ -529,6 +552,7 @@ namespace DesignTimeHostDemo
                 DesignTimeHostPort = 1334;
                 ProjectContextMapping = new Dictionary<string, int>();
                 Projects = new Dictionary<int, ProjectState>();
+                WorkspaceMapping = new Dictionary<ProjectId, FrameworkState>();
             }
 
             public bool TryAddProject(string projectFile, out int contextId)
@@ -545,7 +569,8 @@ namespace DesignTimeHostDemo
                 ProjectContextMapping[projectFile] = contextId;
                 Projects[contextId] = new ProjectState
                 {
-                    Path = projectFile
+                    Path = projectFile,
+                    ContextId = contextId
                 };
 
                 return true;
