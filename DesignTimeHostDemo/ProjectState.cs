@@ -6,6 +6,8 @@ namespace DesignTimeHostDemo
 {
     public class ProjectState
     {
+        public string Path { get; set; }
+
         public ConcurrentDictionary<string, FrameworkState> ProjectsByFramework { get; private set; }
 
         public ProjectState()
@@ -26,6 +28,8 @@ namespace DesignTimeHostDemo
 
         public Dictionary<string, ProjectId> ProjectReferences { get; set; }
 
+        public HashSet<string> ProjectDependeees { get; set; }
+
         public List<ProjectId> PendingProjectReferences { get; set; }
 
         public bool Loaded { get; set; }
@@ -38,6 +42,7 @@ namespace DesignTimeHostDemo
             RawReferences = new Dictionary<string, MetadataReference>();
             ProjectReferences = new Dictionary<string, ProjectId>();
             PendingProjectReferences = new List<ProjectId>();
+            ProjectDependeees = new HashSet<string>();
         }
     }
 }

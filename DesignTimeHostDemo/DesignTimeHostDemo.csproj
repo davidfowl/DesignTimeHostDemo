@@ -98,6 +98,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="FileWatcher.cs" />
     <Compile Include="MyCustomWorkspace.cs" />
     <Compile Include="Omnisharp\AutoCompleteResponse.cs" />
     <Compile Include="Omnisharp\Request.cs" />

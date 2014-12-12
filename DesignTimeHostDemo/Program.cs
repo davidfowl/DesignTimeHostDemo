@@ -78,6 +78,8 @@ namespace DesignTimeHostDemo
             context.RuntimePath = GetRuntimePath();
 
             var wh = new ManualResetEventSlim();
+            var watcher = new FileWatcher(applicationRoot);
+            watcher.OnChanged += (path, changeType) => OnDependenciesChanged(context, path, changeType);
 
             StartRuntime(context.RuntimePath, context.HostId, context.DesignTimeHostPort, () =>
             {
@@ -98,23 +100,25 @@ namespace DesignTimeHostDemo
                     {
                         var val = m.Payload.ToObject<ProjectMessage>();
 
+                        if (val.GlobalJsonPath != null)
+                        {
+                            watcher.WatchFile(val.GlobalJsonPath);
+                        }
+
                         var unprocessed = project.ProjectsByFramework.Keys.ToList();
 
                         foreach (var framework in val.Frameworks)
                         {
                             unprocessed.Remove(framework.FrameworkName);
-
-                            bool exists = true;
-
+                            
                             var frameworkState = project.ProjectsByFramework.GetOrAdd(framework.FrameworkName, _ =>
                             {
-                                exists = false;
                                 return new FrameworkState();
                             });
 
                             var id = frameworkState.ProjectId;
 
-                            if (exists)
+                            if (workspace.CurrentSolution.ContainsProject(id))
                             {
                                 continue;
                             }
@@ -223,6 +227,7 @@ namespace DesignTimeHostDemo
                                     referencedProject.PendingProjectReferences.Add(projectId);
                                 }
                             }
+                            referencedProject.ProjectDependeees.Add(project.Path);
 
                             frameworkState.ProjectReferences[projectReference.Path] = projectReferenceId;
                         }
@@ -333,13 +338,64 @@ namespace DesignTimeHostDemo
                 // Start the message channel
                 context.Connection.Start();
 
-                ScanForAspNet5Projects(context, applicationRoot);
+                // Scan for the projects
+                ScanForAspNet5Projects(context, applicationRoot, watcher);
             });
 
             wh.Wait();
         }
 
-        private static void ScanForAspNet5Projects(AspNet5Context context, string applicationRoot)
+        private static void OnDependenciesChanged(AspNet5Context context, string path, WatcherChangeTypes changeType)
+        {
+            // A -> B -> C
+            // If C changes, trigger B and A
+
+            TriggerDependeees(context, path);
+        }
+
+        private static void TriggerDependeees(AspNet5Context context, string path)
+        {
+            var seen = new HashSet<string>();
+            var results = new HashSet<int>();
+            var stack = new Stack<string>();
+
+            stack.Push(path);
+
+            while (stack.Count > 0)
+            {
+                var projectPath = stack.Pop();
+
+                if (!seen.Add(projectPath))
+                {
+                    continue;
+                }
+
+                int contextId;
+                if (context.ProjectContextMapping.TryGetValue(projectPath, out contextId))
+                {
+                    results.Add(contextId);
+
+                    foreach (var frameworkState in context.Projects[contextId].ProjectsByFramework.Values)
+                    {
+                        foreach (var dependee in frameworkState.ProjectDependeees)
+                        {
+                            stack.Push(dependee);
+                        }
+                    }
+                }
+            }
+
+            foreach (var contextId in results)
+            {
+                var message = new Message();
+                message.HostId = context.HostId;
+                message.ContextId = contextId;
+                message.MessageType = "FilesChanged";
+                context.Connection.Post(message);
+            }
+        }
+
+        private static void ScanForAspNet5Projects(AspNet5Context context, string applicationRoot, FileWatcher watcher)
         {
             Console.WriteLine("Scanning {0} for ASP.NET 5 projects", applicationRoot);
 
@@ -368,6 +424,7 @@ namespace DesignTimeHostDemo
                     HostId = context.HostId
                 });
 
+                watcher.WatchFile(projectFile);
                 Console.WriteLine("Detected {0}", projectFile);
             }
         }
@@ -486,7 +543,10 @@ namespace DesignTimeHostDemo
 
                 // Create a mapping from path to contextid and back
                 ProjectContextMapping[projectFile] = contextId;
-                Projects[contextId] = new ProjectState();
+                Projects[contextId] = new ProjectState
+                {
+                    Path = projectFile
+                };
 
                 return true;
             }

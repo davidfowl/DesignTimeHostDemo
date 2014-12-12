@@ -11,7 +11,6 @@ namespace DesignTimeHostDemo
     {
         public MyCustomWorkspace() : base(MefHostServices.DefaultHost, "Custom")
         {
-
         }
 
         public void AddProject(ProjectInfo projectInfo)
